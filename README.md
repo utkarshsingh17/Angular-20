@@ -198,3 +198,134 @@ export class DashboardComponent {
   del(id: number) { if (confirm('Delete this task?')) this.#svc.remove(id); }
   complete(id: number) { this.#svc.complete(id); }
 }
+
+
+
+--------------_------------------------------
+
+
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { NgClass, NgIf } from '@angular/common';
+import { Task, TaskPriority } from '../../core/models/task.model';
+import { TaskService } from '../../core/services/task.service';
+
+@Component({
+  standalone: true,
+  selector: 'app-task-detail',
+  imports: [RouterLink, ReactiveFormsModule, NgClass, NgIf],
+  template: `
+  @if(task()){
+  <div class="container container-narrow py-4">
+    <div class="d-flex align-items-center gap-2 mb-3">
+      <a routerLink="/dashboard" class="btn btn-outline-secondary">Back to Dashboard</a>
+      <h1 class="m-0 flex-grow-1">Task Details</h1>
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-8">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <div class="d-flex align-items-center gap-2 mb-2">
+              <span class="badge text-bg-secondary text-capitalize">{{ task()!.status.replace('_',' ') }}</span>
+              <span class="badge" [ngClass]="{
+                'text-bg-danger': task()!.priority==='high',
+                'text-bg-warning': task()!.priority==='medium',
+                'text-bg-success': task()!.priority==='low'
+              }">{{ task()!.priority }} priority</span>
+            </div>
+
+            @if(!editing()){
+              <h3 class="mb-2">{{ task()!.title }}</h3>
+              <p class="text-muted">{{ task()!.description || 'No description' }}</p>
+              <p class="mb-0">Due: {{ task()!.dueDate || '—' }}</p>
+            } @else {
+              <form [formGroup]="form" class="mt-2">
+                <div class="mb-2"><label class="form-label">Title</label>
+                  <input class="form-control" formControlName="title"></div>
+                <div class="mb-2"><label class="form-label">Description</label>
+                  <textarea class="form-control" rows="3" formControlName="description"></textarea></div>
+                <div class="row g-2">
+                  <div class="col-md-4">
+                    <label class="form-label">Priority</label>
+                    <select class="form-select" formControlName="priority">
+                      <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                    </select>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Status</label>
+                    <select class="form-select" formControlName="status">
+                      <option value="pending">Pending</option>
+                      <option value="in_progress">In Progress</option>
+                      <option value="completed">Completed</option>
+                    </select>
+                  </div>
+                  <div class="col-md-4">
+                    <label class="form-label">Due Date</label>
+                    <input type="date" class="form-control" formControlName="dueDate">
+                  </div>
+                </div>
+              </form>
+            }
+          </div>
+
+          <div class="card-footer d-flex gap-2 bg-white">
+            @if(!editing()){ <button class="btn btn-outline-primary" (click)="toggle()">Edit Task</button> }
+            @else { <button class="btn btn-primary" (click)="save()">Save Changes</button> }
+            <button class="btn btn-success" (click)="complete()" [disabled]="task()!.status==='completed'">Mark Complete</button>
+            <button class="btn btn-outline-danger ms-auto" (click)="del()">Delete Task</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-md-4">
+        <div class="card shadow-sm">
+          <div class="card-body">
+            <h5 class="card-title">Task Metadata</h5>
+            <div class="small text-muted">
+              <div><strong>Task ID:</strong> {{ task()!.id }}</div>
+              <div><strong>Created:</strong> {{ task()!.createdAt | date:'medium' }}</div>
+              <div><strong>Updated:</strong> {{ task()!.updatedAt | date:'medium' }}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div> }`
+})
+export class TaskDetailComponent implements OnInit {
+  #route = inject(ActivatedRoute);
+  #router = inject(Router);
+  #svc = inject(TaskService);
+  #fb = inject(FormBuilder);
+
+  task = signal<Task | undefined>(undefined);
+  editing = signal(false);
+
+  form = this.#fb.group({
+    title: ['', [Validators.required, Validators.minLength(3)]],
+    description: [''],
+    priority: ['medium' as TaskPriority],
+    status: ['pending'],
+    dueDate: ['']
+  });
+
+  ngOnInit() {
+    const id = Number(this.#route.snapshot.paramMap.get('id'));
+    const t = this.#svc.getById(id);
+    if (!t) { this.#router.navigateByUrl('/dashboard'); return; }
+    this.task.set(t);
+    this.form.patchValue(t);
+  }
+
+  toggle(){ this.editing.set(!this.editing()); }
+  save(){
+    const t = this.task(); if (!t || this.form.invalid) { this.form.markAllAsTouched(); return; }
+    this.#svc.update(t.id, this.form.value as any);
+    this.task.set(this.#svc.getById(t.id));
+    this.editing.set(false);
+  }
+  complete(){ const t = this.task(); if (t){ this.#svc.complete(t.id); this.task.set(this.#svc.getById(t.id)); } }
+  del(){ const t = this.task(); if (t && confirm('Delete this task permanently?')) { this.#svc.remove(t.id); this.#router.navigateByUrl('/dashboard'); } }
+}
