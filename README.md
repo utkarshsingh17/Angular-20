@@ -1,71 +1,74 @@
 import { Injectable, signal } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { firstValueFrom } from 'rxjs';
-
-export interface ApiUser {
-  id?: number;
-  username: string;
-  email: string;
-  password: string;
-  fullName?: string;
-  track?: string | null;
-  avatarUrl?: string;
-  joinDate?: string;
-  role: 'Learner' | 'Admin' | 'Author';
-  bio?: string | null;
-  location?: string | null;
-}
+import { HttpClient, HttpParams } from '@angular/common/http';
+import { User, PublicUser, Role } from './models/user';
+import { Observable, throwError } from 'rxjs';
+import { map, switchMap, tap } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private static SESSION_KEY = 'app_session_user_v1';
   private API = 'http://localhost:3000';
 
-  currentUserSig = signal<Omit<ApiUser, 'password'> | null>(this.readSession());
+  currentUserSig = signal<PublicUser | null>(this.readSession());
+
+  user$ = toObservable(this.currentUserSig);
+  role$ = this.user$.pipe(map(u => u?.role ?? null));
+  isLoggedIn$ = this.user$.pipe(map(u => !!u));
 
   constructor(private http: HttpClient) {}
 
-  private readSession() {
+  private readSession(): PublicUser | null {
     try { return JSON.parse(localStorage.getItem(AuthService.SESSION_KEY) || 'null'); } catch { return null; }
   }
-  private writeSession(user: Omit<ApiUser, 'password'> | null) {
+  private writeSession(user: PublicUser | null) {
     if (user) localStorage.setItem(AuthService.SESSION_KEY, JSON.stringify(user));
     else localStorage.removeItem(AuthService.SESSION_KEY);
   }
 
-  async register(payload: {username: string; email: string; password: string; role: 'Learner'|'Admin'|'Author'}): Promise<string | null> {
-    try {
-      const exists = await firstValueFrom(this.http.get<ApiUser[]>(`${this.API}/users`, { params: { email: payload.email.toLowerCase() } }));
-      if (exists.length) return 'Email already registered';
+  register(payload: { username: string; email: string; password: string; role: Role; fullName?: string; track?: string | null; location?: string | null; }): Observable<void> {
+    const normalizedEmail = payload.email.trim().toLowerCase();
+    const params = new HttpParams().set('email', normalizedEmail);
 
-      const toCreate: ApiUser = {
-        ...payload,
-        email: payload.email.trim().toLowerCase(),
-        joinDate: new Date().toISOString(),
-        avatarUrl: `https://i.pravatar.cc/150?u=${payload.username}`
-      };
-      await firstValueFrom(this.http.post<ApiUser>(`${this.API}/users`, toCreate));
-      return null;
-    } catch (e) {
-      return 'Failed to register. Is the API running?';
-    }
+    return this.http.get<User[]>(`${this.API}/users`, { params }).pipe(
+      switchMap(users => {
+        if (users.length) return throwError(() => new Error('Email already registered'));
+
+        const toCreate: User = {
+          username: payload.username.trim(),
+          email: normalizedEmail,
+          password: payload.password,
+          fullName: payload.fullName?.trim(),
+          track: payload.track ?? null,
+          location: payload.location ?? null,
+          role: payload.role,
+          joinDate: new Date().toISOString(),
+          avatarUrl: `https://i.pravatar.cc/150?u=${encodeURIComponent(payload.username.trim())}`,
+          bio: null
+        };
+
+        return this.http.post<User>(`${this.API}/users`, toCreate).pipe(map(() => void 0));
+      })
+    );
   }
 
-  async login(email: string, password: string): Promise<string | null> {
-    try {
-      const users = await firstValueFrom(this.http.get<ApiUser[]>(`${this.API}/users`, { params: { email: email.toLowerCase(), password } }));
-      const user = users[0];
-      if (!user) return 'Invalid email or password';
-      const { password: _pw, ...publicUser } = user as any;
-      this.writeSession(publicUser);
-      this.currentUserSig.set(publicUser);
-      return null;
-    } catch (e) {
-      return 'Login failed. Is the API running?';
-    }
+  login(email: string, password: string): Observable<void> {
+    const params = new HttpParams().set('email', email.trim().toLowerCase()).set('password', password);
+
+    return this.http.get<User[]>(`${this.API}/users`, { params }).pipe(
+      map(users => users[0] ?? null),
+      switchMap(user => {
+        if (!user) return throwError(() => new Error('Invalid email or password'));
+        const { password: _pw, ...publicUser } = user as any;
+        this.writeSession(publicUser);
+        this.currentUserSig.set(publicUser);
+        return new Observable<void>(sub => { sub.next(); sub.complete(); });
+      })
+    );
   }
 
-  logout() { this.writeSession(null); this.currentUserSig.set(null); }
-  isLoggedIn() { return !!this.currentUserSig(); }
-  role() { return this.currentUserSig()?.role; }
+  logout() {
+    this.writeSession(null);
+    this.currentUserSig.set(null);
+  }
 }
