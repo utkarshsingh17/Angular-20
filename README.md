@@ -72,3 +72,23 @@ export class AuthService {
     this.currentUserSig.set(null);
   }
 }
+..............................
+
+
+export type Role = 'learner' | 'admin' | 'author';
+
+export interface User {
+  id?: number;
+  username: string;
+  email: string;
+  password: string; // mock only
+  fullName?: string;
+  track?: string | null;
+  avatarUrl?: string | null;
+  joinDate?: string;
+  role: Role;
+  bio?: string | null;
+  location?: string | null;
+}
+
+export type PublicUser = Omit<User, 'password'>;
