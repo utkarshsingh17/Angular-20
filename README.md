@@ -4,11 +4,16 @@ import { firstValueFrom } from 'rxjs';
 
 export interface ApiUser {
   id?: number;
-  name: string;
+  username: string;
   email: string;
-  password: string; // mock only
-  role: 'admin' | 'learner';
-  createdAt?: string;
+  password: string;
+  fullName?: string;
+  track?: string | null;
+  avatarUrl?: string;
+  joinDate?: string;
+  role: 'Learner' | 'Admin' | 'Author';
+  bio?: string | null;
+  location?: string | null;
 }
 
 @Injectable({ providedIn: 'root' })
@@ -28,18 +33,16 @@ export class AuthService {
     else localStorage.removeItem(AuthService.SESSION_KEY);
   }
 
-  async register(payload: {name: string; email: string; password: string; role: 'admin'|'learner'}): Promise<string | null> {
+  async register(payload: {username: string; email: string; password: string; role: 'Learner'|'Admin'|'Author'}): Promise<string | null> {
     try {
-      // uniqueness check
       const exists = await firstValueFrom(this.http.get<ApiUser[]>(`${this.API}/users`, { params: { email: payload.email.toLowerCase() } }));
       if (exists.length) return 'Email already registered';
 
       const toCreate: ApiUser = {
-        name: payload.name.trim(),
+        ...payload,
         email: payload.email.trim().toLowerCase(),
-        password: payload.password,
-        role: payload.role,
-        createdAt: new Date().toISOString()
+        joinDate: new Date().toISOString(),
+        avatarUrl: `https://i.pravatar.cc/150?u=${payload.username}`
       };
       await firstValueFrom(this.http.post<ApiUser>(`${this.API}/users`, toCreate));
       return null;
@@ -62,11 +65,7 @@ export class AuthService {
     }
   }
 
-  logout() {
-    this.writeSession(null);
-    this.currentUserSig.set(null);
-  }
-
+  logout() { this.writeSession(null); this.currentUserSig.set(null); }
   isLoggedIn() { return !!this.currentUserSig(); }
   role() { return this.currentUserSig()?.role; }
 }
