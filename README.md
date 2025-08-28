@@ -1,36 +1,59 @@
-import { Course, User } from './models';
+import { computed, Injectable, signal } from '@angular/core';
+import { COURSES } from './mock-data';
+import { Course, Level } from './models';
 
-export const userMock: User = {
-  name: 'Utkarsh Singh', role: 'Learner',
-  avatar: 'https://i.pravatar.cc/80?img=3'
-};
+type SortKey = 'latest'|'highestRating'|'highestReviewed'|'az'|'za';
 
-export const COURSES: Course[] = [
-  {
-    id: 'gda-1',
-    title: 'Google Data Analytics Course-1',
-    provider: 'Coursera',
-    thumbnail: 'https://picsum.photos/seed/gda1/640/360',
-    progress: 21, rating: 4.8, reviews: 1278, enrolled: 45908,
-    level: 'Beginner', durationWeeks: 8, publishedAt: '2024-12-20',
-    topics: ['Data', 'Analytics', 'SQL'], author: 'Stephen Mason',
-    tagline: 'Become a Prompt Engineering Expert.',
-    description: 'Deep dive into analytics and prompt engineering...',
-    whatYouLearn: ['SQL basics','Data viz','Dashboards'],
-    skills: ['SQL','Data Studio','ETL'],
-    sections: [
-      { title: 'Introduction', time: '45 min',
-        lectures: [{title: 'Welcome', time: '6 min'},{title:'Setup', time:'12 min'}] },
-      { title: 'Dashboards', time: '1h 10m',
-        lectures: [{title:'Charts', time:'18 min'}] }
-    ],
-    testimonials: [
-      { rating: 4.8, text: 'Great program—career boost!', name:'Wade Warren', avatar:'https://i.pravatar.cc/60?img=5', org:'Learners for US' },
-      { rating: 4.7, text: 'Loved the exercises.', name:'Jacob Jones', avatar:'https://i.pravatar.cc/60?img=9', org:'Learners for India' }
-    ]
-  },
-  // add more with different levels/durations/publishedAt
-];
+@Injectable({ providedIn: 'root' })
+export class CourseStore {
+  readonly all = signal<Course[]>(COURSES);
+  readonly q = signal<string>('');
+  readonly selectedLevels = signal<Set<Level>>(new Set());
+  readonly selectedRatings = signal<number | null>(null);   // >=
+  readonly minWeeks = signal<number | null>(null);
+  readonly maxWeeks = signal<number | null>(null);
+  readonly author = signal<string | null>(null);
+  readonly topics = signal<Set<string>>(new Set());
+  readonly sort = signal<SortKey>('latest');
+  readonly page = signal(1);
+  readonly pageSize = 12;
 
-export const lastViewedIds = ['gda-1'];
-export const newlyLaunchedIds = ['gda-1']; // demo
+  readonly suggestions = computed(() =>
+    this.all().filter(c => c.title.toLowerCase().includes(this.q().toLowerCase())).slice(0, 6)
+  );
+
+  readonly filtered = computed(() => {
+    const term = this.q().toLowerCase().trim();
+    let res = this.all();
+    if (term) res = res.filter(c => [c.title, c.tagline, c.topics.join(' ')].join(' ').toLowerCase().includes(term));
+    if (this.selectedLevels().size) res = res.filter(c => this.selectedLevels().has(c.level));
+    if (this.selectedRatings()) res = res.filter(c => c.rating >= (this.selectedRatings()!));
+    if (this.minWeeks()) res = res.filter(c => c.durationWeeks >= this.minWeeks()!);
+    if (this.maxWeeks()) res = res.filter(c => c.durationWeeks <= this.maxWeeks()!);
+    if (this.author()) res = res.filter(c => c.author === this.author());
+    if (this.topics().size) res = res.filter(c => c.topics.some(t => this.topics().has(t)));
+    switch (this.sort()) {
+      case 'latest': res = res.toSorted((a,b)=>+new Date(b.publishedAt)-+new Date(a.publishedAt)); break;
+      case 'highestRating': res = res.toSorted((a,b)=>b.rating-a.rating); break;
+      case 'highestReviewed': res = res.toSorted((a,b)=>b.reviews-a.reviews); break;
+      case 'az': res = res.toSorted((a,b)=>a.title.localeCompare(b.title)); break;
+      case 'za': res = res.toSorted((a,b)=>b.title.localeCompare(a.title)); break;
+    }
+    return res;
+  });
+
+  readonly paged = computed(() => {
+    const start = (this.page()-1)*this.pageSize;
+    return this.filtered().slice(start, start+this.pageSize);
+  });
+
+  resetFilters() {
+    this.selectedLevels.set(new Set());
+    this.selectedRatings.set(null);
+    this.minWeeks.set(null);
+    this.maxWeeks.set(null);
+    this.author.set(null);
+    this.topics.set(new Set());
+    this.sort.set('latest'); this.page.set(1);
+  }
+}
