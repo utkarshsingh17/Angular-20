@@ -1,75 +1,27 @@
-import { Injectable, signal, computed, effect } from '@angular/core';
+export type Level = 'Beginner'|'Intermediate'|'Advanced';
 
-export interface User {
-  username: string;
-  email: string;
-  password: string;
-  role: 'admin' | 'author' | 'learner';
+export interface Course {
+  id: string;
+  title: string;
+  provider: string;        // e.g., "LinkedIn Learning"
+  thumbnail: string;
+  progress?: number;       // 0-100
+  rating: number;          // 0-5
+  reviews: number;         // count
+  enrolled: number;        // count
+  level: Level;
+  durationWeeks: number;
+  publishedAt: string;     // ISO
+  topics: string[];
+  author: string;
+  tagline: string;
+  description: string;
+  whatYouLearn: string[];
+  skills: string[];
+  sections: { title: string; time: string; lectures: { title: string; time: string }[] }[];
+  testimonials?: { rating: number; text: string; name: string; avatar: string; org: string }[];
 }
 
-const USERS_KEY = 'users';
-const CURRENT_KEY = 'currentUser';
-
-// hardcoded defaults
-const DEFAULT_USERS: User[] = [
-  { username: 'admin', email: 'admin@example.com', password: 'admin123', role: 'admin' },
-  { username: 'author', email: 'author@example.com', password: 'author123', role: 'author' }
-];
-
-@Injectable({ providedIn: 'root' })
-export class AuthService {
-  private _users = signal<User[]>(this.loadUsers());
-  private _currentUser = signal<User | null>(this.loadCurrentUser());
-
-  users = this._users.asReadonly();
-  currentUser = this._currentUser.asReadonly();
-  isAuthenticated = computed(() => !!this._currentUser());
-
-  constructor() {
-    // persist automatically
-    effect(() => {
-      localStorage.setItem(USERS_KEY, JSON.stringify(this._users()));
-    });
-    effect(() => {
-      const cu = this._currentUser();
-      cu
-        ? localStorage.setItem(CURRENT_KEY, JSON.stringify(cu))
-        : localStorage.removeItem(CURRENT_KEY);
-    });
-  }
-
-  signup(username: string, email: string, password: string, role: 'learner' = 'learner'): { ok: boolean; msg: string } {
-    if (this._users().some(u => u.username === username || u.email === email)) {
-      return { ok: false, msg: 'User already exists!' };
-    }
-    this._users.update(arr => [...arr, { username, email, password, role }]);
-    return { ok: true, msg: 'Signup successful!' };
-  }
-
-  signin(username: string, password: string): { ok: boolean; msg: string } {
-    const user = this._users().find(u => u.username === username && u.password === password);
-    if (!user) return { ok: false, msg: 'Invalid credentials' };
-    this._currentUser.set(user);
-    return { ok: true, msg: `Welcome ${user.username}!` };
-  }
-
-  signout() {
-    this._currentUser.set(null);
-  }
-
-  private loadUsers(): User[] {
-    const stored = JSON.parse(localStorage.getItem(USERS_KEY) || '[]') as User[];
-    // merge defaults if not already present
-    const merged = [...DEFAULT_USERS];
-    for (const u of stored) {
-      if (!merged.find(m => m.username === u.username)) {
-        merged.push(u);
-      }
-    }
-    return merged;
-  }
-
-  private loadCurrentUser(): User | null {
-    return JSON.parse(localStorage.getItem(CURRENT_KEY) || 'null');
-  }
+export interface User {
+  name: string; role: 'Learner'|'Admin'|'Author'; avatar: string;
 }
