@@ -10,6 +10,12 @@ export interface User {
 const USERS_KEY = 'users';
 const CURRENT_KEY = 'currentUser';
 
+// hardcoded defaults
+const DEFAULT_USERS: User[] = [
+  { username: 'admin', email: 'admin@example.com', password: 'admin123', role: 'admin' },
+  { username: 'author', email: 'author@example.com', password: 'author123', role: 'author' }
+];
+
 @Injectable({ providedIn: 'root' })
 export class AuthService {
   private _users = signal<User[]>(this.loadUsers());
@@ -44,7 +50,7 @@ export class AuthService {
     const user = this._users().find(u => u.username === username && u.password === password);
     if (!user) return { ok: false, msg: 'Invalid credentials' };
     this._currentUser.set(user);
-    return { ok: true, msg: 'Signin successful!' };
+    return { ok: true, msg: `Welcome ${user.username}!` };
   }
 
   signout() {
@@ -52,8 +58,17 @@ export class AuthService {
   }
 
   private loadUsers(): User[] {
-    return JSON.parse(localStorage.getItem(USERS_KEY) || '[]');
+    const stored = JSON.parse(localStorage.getItem(USERS_KEY) || '[]') as User[];
+    // merge defaults if not already present
+    const merged = [...DEFAULT_USERS];
+    for (const u of stored) {
+      if (!merged.find(m => m.username === u.username)) {
+        merged.push(u);
+      }
+    }
+    return merged;
   }
+
   private loadCurrentUser(): User | null {
     return JSON.parse(localStorage.getItem(CURRENT_KEY) || 'null');
   }
