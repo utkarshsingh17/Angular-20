@@ -1,33 +1,102 @@
-from fastapi import FastAPI, UploadFile, File, Form
-from services.parser import parse_document
-from services.storage import store_document
-from services.summarizer import summarize_context
+"""
+main.py
+-----------------
+FastAPI backend exposing endpoints that use AutoGen agents
+for summarization, entity extraction, Q&A, and validation.
+"""
 
-app = FastAPI(title="Document Summarizer API (pgvector)")
+from fastapi import FastAPI
+from pydantic import BaseModel
 
-@app.post("/ingest")
-async def ingest_document(doc_id: str = Form(...), file: UploadFile = File(...)):
-    """
-    Upload a document, parse, chunk, embed and store in pgvector DB.
-    """
-    file_path = f"/tmp/{file.filename}"
-    with open(file_path, "wb") as f:
-        f.write(await file.read())
+from agents.registry import agent_registry
 
-    text = parse_document(file_path)
-    return store_document(doc_id, text)
+# ensure agent modules are imported so they self-register
+import agents.summarization_agent
+import agents.entity_agent
+import agents.qa_agent
+import agents.validator_agent
 
-@app.get("/summary")
-async def fetch_summary(question: str):
-    """
-    Summarize context from stored documents for a question.
-    """
-    return summarize_context(question)
 
-@app.get("/qa")
-async def qa_query(question: str):
+# -------------------------------
+# FastAPI app
+# -------------------------------
+app = FastAPI(title="Intelligent Document Summarization & Q&A Agents")
+
+# -------------------------------
+# Request Models
+# -------------------------------
+class TextRequest(BaseModel):
+    text: str
+
+class QuestionRequest(BaseModel):
+    text: str
+    question: str
+
+class ValidationRequest(BaseModel):
+    content: str
+    type: str  # "summary" | "entities" | "answer"
+
+
+# -------------------------------
+# Endpoints
+# -------------------------------
+@app.post("/summarize")
+def summarize(req: TextRequest):
     """
-    Answer a natural language question using stored document context.
-    (Alias of summary for now)
+    Run the SummarizationAgent on given text.
     """
-    return summarize_context(question)
+    summarizer = agent_registry.get("summarization")
+    output = summarizer.run("Summarize this text:\n" + req.text)
+    return {"summary": output}
+
+
+@app.post("/entities")
+def extract_entities(req: TextRequest):
+    """
+    Run the EntityExtractionAgent on given text.
+    """
+    entity_agent = agent_registry.get("entity")
+    output = entity_agent.run("Extract entities from:\n" + req.text)
+    return {"entities": output}
+
+
+@app.post("/qa")
+def qa(req: QuestionRequest):
+    """
+    Run the QAAgent on text + question.
+    """
+    qa_agent = agent_registry.get("qa")
+    prompt = f"Question: {req.question}\nContext:\n{req.text}"
+    output = qa_agent.run(prompt)
+    return {"question": req.question, "answer": output}
+
+
+@app.post("/validate")
+def validate(req: ValidationRequest):
+    """
+    Run the ValidatorAgent to validate outputs.
+    """
+    validator = agent_registry.get("validator")
+
+    if req.type == "summary":
+        output = validator.run(f"Validate this summary: {req.content}")
+    elif req.type == "entities":
+        output = validator.run(f"Validate these entities: {req.content}")
+    elif req.type == "answer":
+        output = validator.run(f"Validate this answer: {req.content}")
+    else:
+        return {"error": "Invalid type. Use summary | entities | answer"}
+
+    return {"valid": output}
+
+
+# -------------------------------
+# Root Endpoint
+# -------------------------------
+@app.get("/")
+def root():
+    return {
+        "message": "Welcome to Intelligent Document Summarization & Q&A Agents API",
+        "available_agents": agent_registry.list_agents(),
+        "endpoints": ["/summarize", "/entities", "/qa", "/validate"],
+    }
