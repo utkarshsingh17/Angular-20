@@ -1,102 +1,101 @@
-"""
-main.py
------------------
-FastAPI backend exposing endpoints that use AutoGen agents
-for summarization, entity extraction, Q&A, and validation.
-"""
-
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from pydantic import BaseModel
+from typing import List
 
+from services.parser import parse_document
+from services.storage import store_document, list_documents, get_doc_chunks
 from agents.registry import agent_registry
 
-# ensure agent modules are imported so they self-register
+# ensure agents are loaded
 import agents.summarization_agent
 import agents.entity_agent
 import agents.qa_agent
 import agents.validator_agent
 
 
-# -------------------------------
-# FastAPI app
-# -------------------------------
-app = FastAPI(title="Intelligent Document Summarization & Q&A Agents")
+app = FastAPI(title="Doc Summarizer & Q&A Platform")
+
 
 # -------------------------------
-# Request Models
+# Models
 # -------------------------------
-class TextRequest(BaseModel):
-    text: str
-
 class QuestionRequest(BaseModel):
-    text: str
     question: str
-
-class ValidationRequest(BaseModel):
-    content: str
-    type: str  # "summary" | "entities" | "answer"
 
 
 # -------------------------------
 # Endpoints
 # -------------------------------
-@app.post("/summarize")
-def summarize(req: TextRequest):
+
+@app.post("/ingest")
+async def ingest_document(doc_id: str = Form(...), file: UploadFile = File(...)):
     """
-    Run the SummarizationAgent on given text.
+    Upload + embed + store document in pgvector
+    """
+    file_path = f"/tmp/{file.filename}"
+    with open(file_path, "wb") as f:
+        f.write(await file.read())
+
+    text = parse_document(file_path)
+    result = store_document(doc_id, text)
+    return {"doc_id": doc_id, "chunks_stored": result["chunks"], "status": "ingested"}
+
+
+@app.get("/docs")
+def list_docs():
+    """
+    List all available documents
+    """
+    return {"documents": list_documents()}
+
+
+@app.post("/summarize/{doc_id}")
+def summarize_doc(doc_id: str):
+    """
+    Summarize a specific document chosen by user
     """
     summarizer = agent_registry.get("summarization")
-    output = summarizer.run("Summarize this text:\n" + req.text)
-    return {"summary": output}
-
-
-@app.post("/entities")
-def extract_entities(req: TextRequest):
-    """
-    Run the EntityExtractionAgent on given text.
-    """
-    entity_agent = agent_registry.get("entity")
-    output = entity_agent.run("Extract entities from:\n" + req.text)
-    return {"entities": output}
-
-
-@app.post("/qa")
-def qa(req: QuestionRequest):
-    """
-    Run the QAAgent on text + question.
-    """
-    qa_agent = agent_registry.get("qa")
-    prompt = f"Question: {req.question}\nContext:\n{req.text}"
-    output = qa_agent.run(prompt)
-    return {"question": req.question, "answer": output}
-
-
-@app.post("/validate")
-def validate(req: ValidationRequest):
-    """
-    Run the ValidatorAgent to validate outputs.
-    """
     validator = agent_registry.get("validator")
 
-    if req.type == "summary":
-        output = validator.run(f"Validate this summary: {req.content}")
-    elif req.type == "entities":
-        output = validator.run(f"Validate these entities: {req.content}")
-    elif req.type == "answer":
-        output = validator.run(f"Validate this answer: {req.content}")
-    else:
-        return {"error": "Invalid type. Use summary | entities | answer"}
+    chunks = get_doc_chunks(doc_id)
+    full_text = " ".join([c["chunk"] for c in chunks])
 
-    return {"valid": output}
+    summary = summarizer.run("Summarize this text:\n" + full_text)
+    valid = validator.run(f"Validate this summary: {summary}")
+
+    return {"doc_id": doc_id, "summary": summary, "valid": valid}
 
 
-# -------------------------------
-# Root Endpoint
-# -------------------------------
-@app.get("/")
-def root():
-    return {
-        "message": "Welcome to Intelligent Document Summarization & Q&A Agents API",
-        "available_agents": agent_registry.list_agents(),
-        "endpoints": ["/summarize", "/entities", "/qa", "/validate"],
-    }
+@app.post("/qa/{doc_id}")
+def qa_doc(doc_id: str, req: QuestionRequest):
+    """
+    Ask a Q&A question from a specific document
+    """
+    qa_agent = agent_registry.get("qa")
+    validator = agent_registry.get("validator")
+
+    chunks = get_doc_chunks(doc_id)
+    context = " ".join([c["chunk"] for c in chunks])
+
+    answer = qa_agent.run(f"Question: {req.question}\nContext:\n{context}")
+    valid = validator.run(f"Validate this answer: {answer}")
+
+    return {"doc_id": doc_id, "question": req.question, "answer": answer, "valid": valid}
+
+
+@app.post("/entities/{doc_id}")
+def extract_entities(doc_id: str):
+    """
+    Extract entities from a chosen document
+    """
+    entity_agent = agent_registry.get("entity")
+    validator = agent_registry.get("validator")
+
+    chunks = get_doc_chunks(doc_id)
+    full_text = " ".join([c["chunk"] for c in chunks])
+
+    entities = entity_agent.run("Extract entities from:\n" + full_text)
+    valid = validator.run(f"Validate these entities: {entities}")
+
+    return {"doc_id": doc_id, "entities": entities, "valid": valid}
+
