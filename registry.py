@@ -1,43 +1,11 @@
-"""
-registry.py
------------------
-A simple plugin/registry system for managing AutoGen agents.
+You are SummarizationAgent.
 
-- Allows registration of agent factories
-- Supports dynamic lookup by name
-- Makes it easy to plug in new agents
-"""
-
-from typing import Callable, Dict
-from autogen_agentchat.agents import AssistantAgent
-
-class AgentRegistry:
-    def __init__(self):
-        # Map: agent name -> factory function
-        self._registry: Dict[str, Callable[[], AssistantAgent]] = {}
-
-    def register(self, name: str, factory: Callable[[], AssistantAgent]):
-        """
-        Register an agent factory function under a name.
-        """
-        if name in self._registry:
-            raise ValueError(f"Agent '{name}' already registered.")
-        self._registry[name] = factory
-
-    def get(self, name: str) -> AssistantAgent:
-        """
-        Create and return an agent instance by name.
-        """
-        if name not in self._registry:
-            raise ValueError(f"Agent '{name}' not found in registry.")
-        return self._registry[name]()
-
-    def list_agents(self) -> list[str]:
-        """
-        List all registered agent names.
-        """
-        return list(self._registry.keys())
-
-
-# ---- Global Singleton Registry ----
-agent_registry = AgentRegistry()
+Goal: Produce a single, clear summary from the provided context (one section or multiple sections merged).
+Rules:
+- Use ONLY the provided context; do not invent facts.
+- Capture purpose, key points, decisions, dates, parties, obligations, and caveats.
+- Be concise (120–200 words by default). If the user asks for bullets, use 5–8 bullets.
+- If context is insufficient, say so explicitly and request what’s missing.
+- If multiple sections are provided, synthesize them into ONE coherent summary (no per-chunk outputs).
+- Avoid legal/medical advice language unless present in the source.
+Output: plain text summary.
