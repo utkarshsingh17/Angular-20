@@ -1,74 +1,40 @@
 #!/usr/bin/env python3
-#!/usr/bin/env python3
-#!/usr/bin/env python3
 """
-producer_json.py
-Read records from a JSON file (array of objects) and publish them to Kafka topic `weather.readings`.
-
-Usage:
-    python producer_json.py --file data/dummy_data1.json --repeat 1 --interval 0.5
+consumer.py
+Simple Kafka consumer that prints messages from weather.readings
 """
-import argparse
 import json
-import os
 import time
-from kafka import KafkaProducer
+from kafka import KafkaConsumer
 
 BOOTSTRAP_SERVERS = ["localhost:9092"]
 TOPIC = "weather.readings"
+GROUP_ID = "weather.consumer.group"
 
-def create_producer(bootstrap_servers):
-    return KafkaProducer(
-        bootstrap_servers=bootstrap_servers,
-        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
-        linger_ms=5
-    )
-
-def load_json_array(path):
-    with open(path, "r", encoding="utf-8") as f:
-        data = json.load(f)
-        if not isinstance(data, list):
-            raise ValueError("JSON file must contain an array of objects")
-        return data
+consumer = KafkaConsumer(
+    TOPIC,
+    bootstrap_servers=BOOTSTRAP_SERVERS,
+    auto_offset_reset="earliest",   # start from beginning if no offset committed
+    enable_auto_commit=True,
+    group_id=GROUP_ID,
+    value_deserializer=lambda v: json.loads(v.decode("utf-8")),
+    consumer_timeout_ms=1000
+)
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--file", "-f", required=True, help="Path to JSON file containing array of objects")
-    parser.add_argument("--repeat", "-r", type=int, default=1, help="How many times to replay the file (default 1). Use 0 for infinite.")
-    parser.add_argument("--interval", "-i", type=float, default=0.5, help="Seconds between messages (default 0.5)")
-    parser.add_argument("--bootstrap", nargs="+", default=BOOTSTRAP_SERVERS, help="Kafka bootstrap servers")
-    args = parser.parse_args()
-
-    if not os.path.exists(args.file):
-        raise SystemExit(f"File not found: {args.file}")
-
-    records = load_json_array(args.file)
-    producer = create_producer(args.bootstrap)
-
+    print(f"Starting consumer for topic {TOPIC}")
     try:
-        iteration = 0
         while True:
-            iteration += 1
-            count = 0
-            for record in records:
-                station_id = str(record.get("station_id") or f"station-{count}")
-                producer.send(TOPIC, value=record, key=station_id.encode("utf-8"))
-                count += 1
-                print(f"Produced ({count}): {json.dumps(record, ensure_ascii=False)}")
-                time.sleep(args.interval)
-            producer.flush()
-            print(f"Finished sending {count} records (iteration #{iteration})")
-
-            if args.repeat == 0:
-                continue
-            if iteration >= args.repeat:
-                break
+            for msg in consumer:
+                received_ts = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime())
+                key = msg.key.decode("utf-8") if msg.key else None
+                print(f"[{received_ts}] partition:{msg.partition} offset:{msg.offset} key:{key} value:{json.dumps(msg.value, ensure_ascii=False)}")
+            time.sleep(0.2)
     except KeyboardInterrupt:
-        print("Producer interrupted.")
+        print("Stopping consumer...")
     finally:
-        producer.flush()
-        producer.close()
-        print("Producer closed.")
+        consumer.close()
+        print("Consumer closed.")
 
 if __name__ == "__main__":
     main()
