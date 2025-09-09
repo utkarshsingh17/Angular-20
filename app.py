@@ -1,18 +1,13 @@
-{
-  "name": "pg-weather-connector",
-  "config": {
-    "connector.class": "io.debezium.connector.postgresql.PostgresConnector",
-    "tasks.max": "1",
-    "database.hostname": "postgres",
-    "database.port": "5432",
-    "database.user": "postgres",
-    "database.password": "postgres",
-    "database.dbname": "weather_db",
-    "database.server.name": "pgserver1",
-    "schema.include.list": "public",
-    "table.include.list": "public.weather_readings",
-    "slot.name": "weather_slot",
-    "publication.name": "weather_pub",
-    "plugin.name": "pgoutput"
-  }
-}
+podman run -d --name connect `
+  --network debezium-net `
+  -e "BOOTSTRAP_SERVERS=host.containers.internal:9092" `
+  -e "GROUP_ID=1" `
+  -e "CONFIG_STORAGE_TOPIC=my_connect_configs" `
+  -e "OFFSET_STORAGE_TOPIC=my_connect_offsets" `
+  -e "STATUS_STORAGE_TOPIC=my_connect_statuses" `
+  -e "KEY_CONVERTER=org.apache.kafka.connect.json.JsonConverter" `
+  -e "VALUE_CONVERTER=org.apache.kafka.connect.json.JsonConverter" `
+  -e "VALUE_CONVERTER_SCHEMAS_ENABLE=false" `
+  -e "KEY_CONVERTER_SCHEMAS_ENABLE=false" `
+  -p 8083:8083 `
+  quay.io/debezium/connect:2.7
