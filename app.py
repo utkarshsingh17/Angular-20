@@ -1,102 +1,62 @@
-# As an Intern
-# load_mysql_raw_to_spark.py
-# Read raw tables from MySQL into Spark DataFrames, validate, and write Bronze parquet.
-# Using Python logger for structured logging.
+USE cricket_dw;
 
-import logging
-import os
-import sys
-from pyspark.sql import SparkSession, functions as F
+-- dims
+CREATE TABLE IF NOT EXISTS dim_venue (
+  venue_id BIGINT PRIMARY KEY,
+  venue_name VARCHAR(512)
+);
 
-# ---------- LOGGER ----------
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.StreamHandler(sys.stdout)]
-)
-logger = logging.getLogger("RawDataLoader")
+CREATE TABLE IF NOT EXISTS dim_team (
+  team_id BIGINT PRIMARY KEY,
+  team_name VARCHAR(255)
+);
 
-# ---------- CONFIG ----------
-MYSQL_HOST = "localhost"
-MYSQL_PORT = 3306
-MYSQL_DB = "cricket_src"
-MYSQL_USER = "root"
-MYSQL_PASS = "your_mysql_password"   # change
-TABLES = ["players_raw", "matches_raw"]
+CREATE TABLE IF NOT EXISTS dim_player (
+  player_id BIGINT PRIMARY KEY,
+  team_id BIGINT,
+  player_name VARCHAR(512),
+  born_date DATE,
+  age_years INT,
+  birth_place VARCHAR(512),
+  role VARCHAR(128),
+  batting_style VARCHAR(128),
+  bowling_style VARCHAR(128),
+  test_player_id BIGINT,
+  odi_player_id BIGINT,
+  t20_player_id BIGINT,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
 
-BRONZE_DIR = "/tmp/cricket_bronze"   # local bronze layer
+-- facts
+CREATE TABLE IF NOT EXISTS fact_match (
+  match_id BIGINT PRIMARY KEY,
+  series_id BIGINT,
+  match_name VARCHAR(512),
+  venue_id BIGINT,
+  start_date DATE,
+  end_date DATE,
+  team1_score VARCHAR(128), -- keep text as it might include wickets
+  team2_score VARCHAR(128),
+  player_of_match_id BIGINT
+);
 
-WRITE_BACK_TO_DW = False
-DW_JDBC_URL = f"jdbc:mysql://{MYSQL_HOST}:{MYSQL_PORT}/cricket_dw?useSSL=false&serverTimezone=UTC"
-DW_USER = "dw_user"
-DW_PASS = "dw_pass"
+-- player format stats (separate tables, same columns)
+CREATE TABLE IF NOT EXISTS fact_player_test_stats (
+  player_id BIGINT,
+  test_player_id BIGINT,
+  matches INT, innings INT, runs_scored BIGINT, balls_faced BIGINT,
+  high_score VARCHAR(64), average DOUBLE, strike_rate DOUBLE, not_outs INT,
+  fours INT, sixes INT, fifties INT, hundreds INT,
+  double_hundreds INT, bowling_innings INT, balls_bowled BIGINT,
+  runs_conceded BIGINT, wickets INT, bowling_average DOUBLE, economy DOUBLE,
+  bowling_strike_rate DOUBLE, best_bowling_in_innings VARCHAR(64),
+  best_bowling_in_match VARCHAR(64), five_wicket_hauls INT, ten_wicket_hauls INT
+);
 
-jdbc_url = f"jdbc:mysql://{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}?useSSL=false&serverTimezone=UTC"
+CREATE TABLE IF NOT EXISTS fact_player_odi_stats LIKE fact_player_test_stats;
+CREATE TABLE IF NOT EXISTS fact_player_t20_stats LIKE fact_player_test_stats;
 
-# ---------- Spark ----------
-spark = SparkSession.builder \
-    .appName("load-mysql-raw-to-spark") \
-    .config("spark.sql.shuffle.partitions", "4") \
-    .getOrCreate()
-spark.sparkContext.setLogLevel("WARN")
-
-os.makedirs(BRONZE_DIR, exist_ok=True)
-
-def read_table(table_name):
-    logger.info(f"Reading table: {table_name}")
-    df = spark.read.format("jdbc") \
-        .option("url", jdbc_url) \
-        .option("dbtable", table_name) \
-        .option("user", MYSQL_USER) \
-        .option("password", MYSQL_PASS) \
-        .option("driver", "com.mysql.cj.jdbc.Driver") \
-        .load()
-    return df
-
-def write_bronze(df, table_name):
-    path = f"{BRONZE_DIR}/{table_name}"
-    logger.info(f"Writing Bronze parquet for {table_name} -> {path}")
-    df.write.mode("overwrite").parquet(path)
-    logger.info(f"Done writing {table_name}")
-
-def write_back_to_dw(df, table_name):
-    target_table = f"stg_{table_name}"
-    logger.info(f"Writing to DW table {target_table}")
-    df.write.format("jdbc") \
-        .option("url", DW_JDBC_URL) \
-        .option("dbtable", target_table) \
-        .option("user", DW_USER) \
-        .option("password", DW_PASS) \
-        .option("driver", "com.mysql.cj.jdbc.Driver") \
-        .mode("overwrite") \
-        .save()
-    logger.info(f"Done writing to DW {target_table}")
-
-def validate(df, table_name, sample_n=5):
-    cnt = df.count()
-    logger.info(f"Validation: {table_name} row count = {cnt}")
-    df.show(sample_n, truncate=False)
-
-def main():
-    for t in TABLES:
-        try:
-            df = read_table(t)
-        except Exception as e:
-            logger.error(f"Failed to read {t}: {e}")
-            continue
-
-        # tiny cleaning example
-        if "name" in df.columns:
-            df = df.withColumn("name", F.trim(F.col("name")))
-
-        validate(df, t)
-        write_bronze(df, t)
-
-        if WRITE_BACK_TO_DW:
-            write_back_to_dw(df, t)
-
-    logger.info("All tables processed.")
-    spark.stop()
-
-if __name__ == "__main__":
-    main()
+-- Unknown placeholders
+INSERT IGNORE INTO dim_player (player_id, player_name) VALUES (-1, 'UNKNOWN');
+INSERT IGNORE INTO dim_team (team_id, team_name) VALUES (-1, 'UNKNOWN');
+INSERT IGNORE INTO dim_venue (venue_id, venue_name) VALUES (-1, 'UNKNOWN');
